@@ -126,7 +126,7 @@ Run the notebook [`mcp-test.ipynb`](./notebooks/mcp-test.ipynb) to check that yo
     ```
 3. Start the development server:
     ```bash
-    npm run dev
+    npm run start
     ```
 
 **.env file example:**
