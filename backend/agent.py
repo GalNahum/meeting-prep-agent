@@ -5,8 +5,7 @@ from typing import Dict, List
 from typing import Optional as OptionalType
 
 from dotenv import load_dotenv
-from langchain import hub
-from langchain.agents import AgentExecutor, create_react_agent
+from langchain.agents import create_agent
 from langchain_core.callbacks.manager import dispatch_custom_event
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
@@ -63,18 +62,16 @@ class MeetingPlanner:
         self.fast_llm = ChatGroq(
             api_key=os.getenv("GROQ_API_KEY"), model="llama-3.3-70b-versatile"
         )
-        self.react_prompt = hub.pull("hwchase17/react")
         self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
         self.react_tools = [
             TavilySearch(
                 max_results=3, include_raw_content=True, search_depth="advanced"
             )
         ]
-        self.react_agent = create_react_agent(
-            self.react_llm, self.react_tools, self.react_prompt
-        )
-        self.react_agent_executor = AgentExecutor(
-            agent=self.react_agent, tools=self.react_tools, handle_parsing_errors=True
+        self.react_agent = create_agent(
+            model=self.react_llm,
+            tools=self.react_tools,
+            system_prompt="You are a helpful assistant that researches meeting attendees and companies to help prepare for meetings.",
         )
 
     async def calendar_node(self, state: State):
@@ -198,9 +195,13 @@ class MeetingPlanner:
         3. Provide your findings summarized concisely with the relevant links. Do not include anything else in the output.
         """
 
-        result = self.react_agent_executor.invoke({"input": formatted_prompt})
+        result = self.react_agent.invoke(
+            {"messages": [{"role": "user", "content": formatted_prompt}]}
+        )
 
-        return {"react_results": result["output"]}
+        # Extract the final response from the messages
+        final_message = result["messages"][-1]
+        return {"react_results": final_message.content}
 
     def markdown_formatter_node(self, state: State):
         """Format the react results into a markdown string"""
