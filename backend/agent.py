@@ -824,7 +824,6 @@ class MeetingPlanner:
 
         Format the output as clean, well-structured markdown with clear sections and subsections.
         """
-        print("research results: ", research_results)
 
         # Use the LLM to format the results
         formatted_results = self.stream_insights_llm.invoke(
