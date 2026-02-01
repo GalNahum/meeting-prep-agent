@@ -193,37 +193,6 @@ IGPT_INTERNAL_CONTEXT_SCHEMA = {
     }
 }
 
-def _log_igpt_results(data, filename="igpt_results.log"):
-    """
-    Logs calendar events or agent results to a local file with a timestamp.
-
-    Args:
-        data (str|dict|list): The data to log.
-        filename (str): The path to the log file.
-    """
-    try:
-        # Ensure the directory exists if a path is provided
-        log_dir = os.path.dirname(filename)
-        if log_dir and not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-
-        with open(filename, "a", encoding="utf-8") as f:
-            f.write("\n" + "=" * 80 + "\n")
-            f.write(f"Timestamp: {datetime.utcnow().isoformat()}Z\n")
-            f.write("IGPT RESULTS:\n")
-
-            # Format based on type
-            if isinstance(data, str):
-                f.write(data)
-            else:
-                # indent=2 makes the JSON readable in the log file
-                f.write(json.dumps(data, ensure_ascii=False, indent=2))
-
-            f.write("\n")
-
-    except Exception as e:
-        print(f"Failed to write to log: {e}")
-
 # iGPT Router output model (used ONLY to decide whether to call iGPT)
 class IGPTRouteDecision(BaseModel):
     should_run_igpt: bool = Field(
