@@ -275,7 +275,6 @@ class MeetingPlanner:
             model="llama-3.3-70b-versatile"
         )
 
-        #self.fast_llm = ChatOpenAI(model="gpt-4o-mini")
         self.extraction_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
         self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
