@@ -49,8 +49,12 @@ async def analyze_meetings(request: DateRequest):
                 elif kind == "on_custom_event":
                     event_name = event["name"]
                     if event_name in [
+                        "available_calendars",
+                        "calendar_resolution",
                         "calendar_status",
                         "calendar_parser_status",
+                        "igpt_router_status",
+                        "igpt_status",
                         "react_status",
                         "markdown_formatter_status",
                         "company_event",
