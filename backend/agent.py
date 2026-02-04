@@ -21,7 +21,7 @@ from datetime import datetime
 load_dotenv()
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+#logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 IGPT_INTERNAL_CONTEXT_SCHEMA = {
