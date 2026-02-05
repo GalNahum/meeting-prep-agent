@@ -21,7 +21,7 @@ from datetime import datetime
 load_dotenv()
 
 # Set up logging
-#logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 IGPT_INTERNAL_CONTEXT_SCHEMA = {
@@ -29,24 +29,32 @@ IGPT_INTERNAL_CONTEXT_SCHEMA = {
         "type": "object",
         "description": "Structured internal context retrieved from iGPT for upcoming meetings",
         "properties": {
-            "companies": {
+            "meetings": {
                 "type": "array",
-                "description": "List of companies extracted from the calendar meetings, each with internal context",
+                "description": "List of meetings extracted from the calendar, each with internal context",
                 "items": {
                     "type": "object",
-                    "description": "Internal context for a single company and its meeting attendees",
+                    "description": "Internal context for a single meeting and its meeting attendees",
                     "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The current meeting title"
+                        },
+                        "time": {
+                            "type": "string",
+                            "description": "The current meeting start of time range in ISO 8601 format"
+                        },
                         "company": {
                             "type": "string",
                             "description": "The company domain or name associated with the meeting"
                         },
-                        "company_context": {
+                        "context": {
                             "type": "object",
-                            "description": "Internal company-level context gathered from iGPT datasources",
+                            "description": "Internal meeting-level context gathered from iGPT datasources",
                             "properties": {
                                 "has_internal_context": {
                                     "type": "boolean",
-                                    "description": "Indicates whether any internal information was found for this company"
+                                    "description": "Indicates whether any internal information was found for this meeting"
                                 },
                                 "summary": {
                                     "type": "string",
@@ -54,31 +62,31 @@ IGPT_INTERNAL_CONTEXT_SCHEMA = {
                                 },
                                 "key_points": {
                                     "type": "array",
-                                    "description": "Important internal facts, decisions, or historical notes related to the company",
+                                    "description": "Important internal facts, decisions, or historical notes related to the meeting",
                                     "items": {
                                         "type": "string",
-                                        "description": "A single key internal point or fact about the company"
+                                        "description": "A single key internal point or fact about the meeting"
                                     }
                                 },
                                 "open_items": {
                                     "type": "array",
-                                    "description": "Unresolved follow-ups, open threads, or pending action items related to the company",
+                                    "description": "Unresolved follow-ups, open threads, or pending action items related to the meeting",
                                     "items": {
                                         "type": "string",
-                                        "description": "A single open item or follow-up about the company"
+                                        "description": "A single open item or follow-up about the meeting"
                                     }
                                 },
                                 "risks": {
                                     "type": "array",
-                                    "description": "Known internal risks, blockers, or concerns related to the company",
+                                    "description": "Known internal risks, blockers, or concerns related to the meeting",
                                     "items": {
                                         "type": "string",
-                                        "description": "A single identified risk or concern about the company"
+                                        "description": "A single identified risk or concern about the meeting"
                                     }
                                 },
                                 "references": {
                                     "type": "array",
-                                    "description": "Internal iGPT references such as emails, documents, or notes related to the company",
+                                    "description": "Internal iGPT references such as emails, documents, or notes related to the meeting",
                                     "items": {
                                         "type": "object",
                                         "description": "A reference to an internal iGPT-connected source",
@@ -97,7 +105,6 @@ IGPT_INTERNAL_CONTEXT_SCHEMA = {
                                     }
                                 }
                             },
-                            # iGPT strict requirement: required must include EVERY key in properties
                             "required": [
                                 "has_internal_context",
                                 "summary",
@@ -168,7 +175,6 @@ IGPT_INTERNAL_CONTEXT_SCHEMA = {
                                         }
                                     }
                                 },
-                                # iGPT strict requirement: required must include EVERY key in properties
                                 "required": [
                                     "email",
                                     "name",
@@ -182,16 +188,16 @@ IGPT_INTERNAL_CONTEXT_SCHEMA = {
                             }
                         }
                     },
-                    # iGPT strict requirement: required must include EVERY key in properties
-                    "required": ["company", "company_context", "attendees"],
+                    "required": ["title", "time", "company", "context", "attendees"],
                     "additionalProperties": False
                 }
             }
         },
-        "required": ["companies"],
+        "required": ["meetings"],
         "additionalProperties": False
     }
 }
+
 
 # iGPT Router output model (used ONLY to decide whether to call iGPT)
 class IGPTRouteDecision(BaseModel):
@@ -206,12 +212,13 @@ class IGPTRouteDecision(BaseModel):
         description="Short explanation of why iGPT should run or be skipped"
     )
 
+
 # Pydantic models for structured output
 class Attendee(BaseModel):
     email: str
     name: OptionalType[str] = None
-    status: OptionalType[str] = None
-    info: OptionalType[str] = None
+    # status: OptionalType[str] = None
+    # info: OptionalType[str] = None
 
 
 class Meeting(BaseModel):
@@ -236,11 +243,11 @@ class State(TypedDict):
     available_calendars: str
 
     # Calendar selection flow
-    calendar_resolution: CalendarResolution
+    calendar_resolution: Dict[str, Any]
 
     # Event retrieval + parsing
     calendar_data: str
-    calendar_events: List[Dict]
+    calendar_events: List[Dict[str, Any]]
 
     # iGPT enrichment
     igpt_results: str
@@ -269,7 +276,9 @@ class MeetingPlanner:
         self.stream_insights_llm = ChatOpenAI(model="gpt-4.1").with_config(
             {"tags": ["streaming"]}
         )
+
         self.react_llm = ChatOpenAI(model="o3-mini-2025-01-31")
+
         self.fast_llm = ChatGroq(
             api_key=os.getenv("GROQ_API_KEY"),
             model="llama-3.3-70b-versatile"
@@ -285,6 +294,7 @@ class MeetingPlanner:
                 search_depth="advanced"
             )
         ]
+
         self.react_agent = create_agent(
             model=self.react_llm,
             tools=self.react_tools,
@@ -313,7 +323,6 @@ class MeetingPlanner:
 
         self.calendar_resolver_llm = self.extraction_llm.with_structured_output(CalendarResolution)
         self.calendar_parser_llm = self.extraction_llm.with_structured_output(CalendarData)
-
 
     def _calendar_agent(self, *, max_steps: int = 30) -> MCPAgent:
         """
@@ -355,13 +364,16 @@ class MeetingPlanner:
             "Connecting to Google Calendar MCP fetching available calendars..."
         )
 
-        return {
-            "available_calendars": await self._calendar_agent().run((
-                "List all available calendars from both my 'work' and 'personal' accounts,"
-                "if those accounts don't exist, use 'normal' as a fallback."
-            ))
-        }
+        available_calendars = await self._calendar_agent().run((
+            "List all available calendars from both my 'work' and 'personal' accounts,"
+            "if those accounts don't exist, use 'normal' as a fallback."
+        ))
 
+        logger.info(f"Available calendars: {available_calendars}")
+
+        return {
+            "available_calendars": available_calendars
+        }
 
     def calendar_resolution(self, state: State):
         """
@@ -429,10 +441,14 @@ class MeetingPlanner:
         - calendar_names
         """
 
+        calendar_resolution = self.calendar_resolver_llm.invoke(
+            prompt.format(available_calendars=available_calendars)
+        )
+
+        logger.info(f"Calendar resolution: {calendar_resolution}")
+
         return {
-            "calendar_resolution": self.calendar_resolver_llm.invoke(
-                prompt.format(available_calendars=available_calendars)
-            )
+            "calendar_resolution": calendar_resolution.model_dump()
         }
 
     async def calendar_node(self, state: State):
@@ -454,10 +470,14 @@ class MeetingPlanner:
         time_max = dt_start.strftime("%Y-%m-%dT23:59:59")
 
         events_prompt = f"""
+        You MUST call a tool.
+        You are NOT allowed to respond with text.
+        If you do not call a tool, the system will crash.
+
         List all events using the following calendar configuration:
 
-        Account (MUST be list): {calendar_resolution.account}
-        Calendar ID(s): {calendar_resolution.calendar_ids}
+        Account (MUST be list): {calendar_resolution["account"]}
+        Calendar ID(s): {calendar_resolution["calendar_ids"]}
 
         Date:
         - {user_date}
@@ -490,10 +510,14 @@ class MeetingPlanner:
         - Do not add any extra fields (like maxResults) that aren't in the tool definition.
         - Filtering by private extended properties MUST be an empty list e.g., []
         - Filtering by shared extended properties MUST be an empty list e.g., []
-        """
+        """.strip()
+
+        calendar_data = await self._calendar_agent().run(events_prompt)
+
+        logger.info(f"Calendar data: {calendar_data}")
 
         return {
-            "calendar_data": await self._calendar_agent().run(events_prompt)
+            "calendar_data": calendar_data
         }
 
     def calendar_parser_node(self, state: State):
@@ -502,69 +526,79 @@ class MeetingPlanner:
 
         calendar_data = state["calendar_data"]
 
-        # Ensure model names are correct (gpt-4o-mini is reliable for extraction)
-        #parser_llm = self.extraction_llm.with_structured_output(CalendarData)
-
         # Define the prompt for extraction
         # Note: We use the text names and emails from calendar_data
         extraction_prompt = """
-        Extract meeting information from the following calendar data:
+            Task:
+            Extract structured meeting information from the following Google Calendar data.
 
-        {calendar_data}
+            CALENDAR DATA (INPUT — DO NOT FILTER OR DROP ANY EVENTS):
 
-        Important context:
-        - You work for Tavily.
-        - Identify the "Client Company" (the company Tavily is meeting with).
-        - If the company name isn't clear, infer it from the attendee email domains (e.g spikenow.com -> Spikenow).
+            md```
+            {calendar_data}
+            ```
 
-        Rules for Attendees:
-        1. Only include attendees from the client company (exclude anyone with @tavily.com).
-        2. Extract BOTH the full name and the email address for every client attendee.
-        3. If a name is missing in the text, use the email prefix.
+            IMPORTANT — NON-NEGOTIABLE RULES:
+            - You MUST return EVERY meeting present in the input calendar data.
+            - You MUST preserve a 1-to-1 mapping between input events and output meetings.
+            - You are NOT allowed to drop, merge, deduplicate, or filter meetings for any reason.
+            - Even if a meeting appears internal, irrelevant, or has no client attendees, it MUST be returned.
+            - If required information is missing, use empty strings, nulls, or empty arrays.
+            - NEVER invent or infer missing meetings.
 
-        For each meeting, extract:
-        - Meeting title
-        - Client company name
-        - List of client attendees (full name and email)
-        - Meeting time [Hour:Minute AM/PM]
-        """
+            Context:
+            - You work for Tavily.
+            - Tavily is the host organization.
+            - A “client attendee” is any attendee whose email does NOT end with @tavily.com.
 
-        # Parse the calendar data using the string format method
-        structured_data = self.calendar_parser_llm.invoke(
-            extraction_prompt.format(calendar_data=calendar_data)
+            Client company rules:
+            - Identify the client company for each meeting.
+            - If no client company can be identified, set `company` to an empty string "".
+            - If a meeting has only internal attendees, `company` MUST be "".
+
+            Attendee rules (apply strictly):
+            1. Include ONLY attendees whose email addresses appear in the calendar data.
+            2. Exclude attendees whose email ends with @tavily.com.
+            3. If a meeting has no client attendees, return an empty attendees list [].
+            4. For each included attendee, extract:
+               - Full name
+               - Email address
+            5. If an attendee’s full name is missing, derive it from the email prefix
+               (example: john.doe@company.com → John Doe).
+
+            For EACH meeting, return the following fields:
+            - title: Meeting title (string)
+            - company: Client company name or "" if none
+            - attendees: List of client attendees (may be empty)
+            - meeting_time: Meeting start time in ISO 8601 format
+            - link: Google Calendar event link or ""
+
+            Output format:
+            - Return ONLY the extracted structured data.
+            - Output MUST be valid JSON.
+            - Do NOT include explanations, commentary, markdown, or extra text.
+            - The number of output meetings MUST EXACTLY match the number of input events.
+            - Order MUST match the input order.
+        """.strip()
+
+        extraction_prompt = extraction_prompt.format(calendar_data=calendar_data)
+
+        logger.info(
+            "extraction_prompt: %s",
+            extraction_prompt
         )
 
-        # Process into the format needed by the rest of the script
-        calendar_events = []
+        # Parse the calendar data using the string format method
+        calendar_events = self.calendar_parser_llm.invoke(
+            extraction_prompt
+        )
 
-        for meeting in structured_data.meetings:
-            # We trust the LLM's identified company name
-            company = meeting.company
+        logger.info(
+            "Structured data: %s",
+            calendar_events.model_dump()
+        )
 
-            event_data = {
-                "company": company,
-                "title": meeting.title,
-                "meeting_time": meeting.meeting_time,
-                "attendees": {},  # Mapping Email _> Full Name
-            }
-
-            # Process attendees
-            for attendee in meeting.attendees:
-                email = attendee.email
-                # We use the name found by the LLM, fallback to email prefix if None
-                name = attendee.name if attendee.name else email.split("@")[0]
-
-                # Secondary safety check to exclude Tavily employees
-                if "tavily.com" not in email.lower():
-                    event_data["attendees"][email] = name
-
-            if event_data["attendees"]:
-                dispatch_custom_event(
-                    "company_event", f"{company} @ {meeting.meeting_time}"
-                )
-                calendar_events.append(event_data)
-
-        return {"calendar_events": calendar_events}
+        return {"calendar_events": calendar_events.model_dump()["meetings"]}
 
     def igpt_router_node(self, state: State):
         """
@@ -698,20 +732,17 @@ class MeetingPlanner:
 
             Instructions:
 
-            1. Group meetings by company.
-            - If a company appears multiple times, return ONE company object.
+            1. Meeting-level context:
+            - Search internal context related to the meeting.
+            - Always return all required context fields.
 
-            2. Company-level context:
-            - Search internal context related to the company across all meetings.
-            - Always return all required company_context fields.
-
-            3. Attendee-level context:
+            2. Attendee-level context:
             - For EACH attendee email in the meetings:
                 - Search internal conversations where this person participated.
                 - Do NOT infer role, seniority, or intent unless explicitly stated.
                 - Always return all required attendee fields.
 
-            4. If NO internal context exists:
+            3. If NO internal context exists:
             - has_internal_context = false
             - summary = "No internal context found."
             - key_points = []
@@ -727,6 +758,8 @@ class MeetingPlanner:
             - Do NOT include markdown, explanations, or extra text outside the JSON.
         """.strip()
 
+        logger.info("iGPT prompt: " + prompt)
+
         try:
             res = self.igpt.recall.ask(
                 input=prompt,
@@ -734,6 +767,9 @@ class MeetingPlanner:
                 output_format=IGPT_INTERNAL_CONTEXT_SCHEMA,
                 stream=False
             )
+
+            logger.info(f"iGPT results: {res}")
+
         except Exception as e:
             return {"igpt_results": f"iGPT exception: {str(e)}"}
 
@@ -754,37 +790,35 @@ class MeetingPlanner:
     def react_node(self, state: State):
         """Use react architecture to search for information about the attendees"""
 
-        calendar_events = state["calendar_events"]
-        igpt_results = state.get("igpt_results", "")
-
         dispatch_custom_event(
             "react_status", "Searching Tavily for Meeting Insights..."
         )
+
         # Create a function to process a single event
-        formatted_prompt = f"""
-        Your goal is to help me prepare for an upcoming meeting. 
-        You will be provided with the name of a company we are meeting with and a list of attendees.
+        formatted_prompt = """
+            Your goal is to help me prepare for an upcoming meeting. 
+            You will be provided with the name of a company we are meeting with and a list of attendees.
 
-        Meeting information:
-        {calendar_events}
-        
-        Internal context from iGPT connected datasources (may be empty):
-        {igpt_results}
+            Meetings information:
+            {calendar_events}
 
-        Combine the internal iGPT context above with public web research (Tavily search).
-        Use Tavily search for:
-        - attendee public profiles (e.g., LinkedIn)
-        - company AI initiatives / public signals
-        Use iGPT context for:
-        - anything we already discussed internally (emails/threads/notes), risks, decisions, open items
+            Use Tavily search for:
+            - attendee public profiles (e.g., LinkedIn)
+            - company AI initiatives / public signals
 
-        1. Search for the attendees name using all available information such as their email, initials/last name, etc.
-        - provide details on the attendees experience, education, and skills, and location
-        - If there are multiple attendees with the same name, only focus on the one that works at the relevant company
-        - it is important you find the profile of all the attendees!
-        2. Research the company in the context of AI initiatives using tavily search.
-        3. Provide your findings summarized concisely with the relevant links. Do not include anything else in the output.
-        """
+            1. Search for the attendees name using all available information such as their email, initials/last name, etc.
+            - provide details on the attendees experience, education, and skills, and location
+            - If there are multiple attendees with the same name, only focus on the one that works at the relevant company
+            - it is important you find the LinkedIn profile of all the attendees!
+            2. Research the company in the context of AI initiatives using tavily search.
+            3. Provide your findings summarized concisely with the relevant links. Do not include anything else in the output.
+        """.strip()
+
+        formatted_prompt = formatted_prompt.format(
+            calendar_events=state["calendar_events"]
+        )
+
+        logger.info("React prompt: " + formatted_prompt)
 
         result = self.react_agent.invoke(
             {"messages": [{"role": "user", "content": formatted_prompt}]}
@@ -799,39 +833,129 @@ class MeetingPlanner:
         dispatch_custom_event(
             "markdown_formatter_status", "Formatting Meeting Insights..."
         )
+
         research_results = state["react_results"]
-        calendar_events = state["calendar_events"]
 
         # Create a formatting prompt for the LLM
-        formatting_prompt = """
-        You are a meeting preparation assistant. You are given a list of calendar events and research results.
-        Your job is to prepare your colleagues for a day of meetings.
-        You must optimize for clarity and conciseness. Do not include any information that is not relevant to the meeting preparation.
+        if state.get("igpt_should_run", False):
+            igpt_results = state["igpt_results"]
+            formatting_prompt = """
+                You are a meeting preparation assistant.
 
-        Create a well-structured markdown document from the following meeting research results.
+                You are given:
+                - Internal context from iGPT (JSON, structured per meeting and per attendee)
+                - External research results (public web research)
 
-        For each company, create a section with:
-        1. ## Company name @ Time of meeting
-        2. ### Meeting context (only if available)
-        - relevant background information about the company (only if available)
-        - relevant background information about the meeting (only if available)
-        3. ### Attendee subsections with their roles, background, and relevant information 
-        4. Use proper markdown formatting including bold, italics, and bullet points where appropriate
-        5. Please include inline citations as Markdown hyperlinks directly in the response text.
+                Your goal is to prepare colleagues for a day of meetings.
+                Optimize for clarity, usefulness, and conciseness.
+                Do NOT include information that is not directly helpful for meeting preparation.
 
-        Calendar Events: {calendar_events}
-        Research Results: {research_results}
+                IMPORTANT:
+                - Internal (iGPT) and external research MUST be merged into a single, coherent view.
+                - Internal context takes precedence when available.
+                - External research should complement or fill gaps, not duplicate internal context.
+                - Never invent information or infer intent, seniority, or sentiment.
 
-        Format the output as clean, well-structured markdown with clear sections and subsections.
-        """
+                ## Output Structure (Markdown)
+
+                For EACH meeting, create a section:
+
+                ## {{Meeting title}} — {{Company name}} @ {{Meeting time}} [Hour:Minute AM/PM]
+
+                Use the meeting title to frame the context (e.g., demo, review, 1:1, kickoff, planning).
+                Do NOT over-interpret vague titles.
+
+                ### Meeting Context
+                (Include this section ONLY if any relevant context exists)
+
+                Combine internal (iGPT) and external research into a single narrative:
+
+                - **Summary:** concise overview of the company and/or meeting
+                - **Key Points:** important facts, decisions, or historical context
+                - **Open Items:** unresolved follow-ups or pending action items
+                - **Risks / Concerns:** known risks or blockers (only if present)
+
+                Rules:
+                - Prefer internal iGPT information where available.
+                - Use external research only to add useful missing context.
+                - Omit any subsection that has no content.
+
+                ### Attendees
+
+                For EACH attendee, create a subsection:
+
+                #### {{Attendee Name}} ({{Role / Company if known}})
+
+                Combine internal and external context naturally:
+
+                - **Background:** role, experience, or relevant public information
+                - **Internal Context:** prior interactions, notes, or history (if available)
+                - **Key Points:** important internal or external facts related to this attendee
+                - **Open Items:** follow-ups or action items involving this attendee
+
+                Rules:
+                - If an attendee has no internal context, do not mention it.
+                - If no open items or key points exist, omit those subsections.
+                - Include inline Markdown links when referencing external sources.
+
+                ## General Formatting Rules
+
+                - Use clean, readable Markdown
+                - Use **bold** for labels and section headers
+                - Use bullet points for lists
+                - Merge internal and external context smoothly (do NOT label as “iGPT” or “external”)
+                - Include inline citations as Markdown links where applicable
+                - Do NOT include raw JSON
+                - Do NOT include explanations, meta commentary, or implementation notes
+
+                ## Inputs
+                iGPT Results (internal context, JSON):
+                {igpt_results}
+
+                Research Results (external context):
+                {research_results}
+            """.strip()
+
+            formatting_prompt = formatting_prompt.format(
+                igpt_results=igpt_results,
+                research_results=research_results
+            )
+
+        else:
+            formatting_prompt = """
+                You are a meeting preparation assistant. You are given a list of calendar events and research results.
+                Your job is to prepare your colleagues for a day of meetings.
+                You must optimize for clarity and conciseness. Do not include any information that is not relevant to the meeting preparation.
+
+                Create a well-structured markdown document from the following meeting research results.
+
+                For each company, create a section with:
+                1. ## Company name @ Time of meeting
+                2. ### Meeting context (only if available)
+                - relevant background information about the company (only if available)
+                - relevant background information about the meeting (only if available)
+                3. ### Attendee subsections with their roles, background, and relevant information 
+                4. Use proper markdown formatting including bold, italics, and bullet points where appropriate
+                5. Please include inline citations as Markdown hyperlinks directly in the response text.
+
+                Calendar Events: {calendar_events}
+                Research Results: {research_results}
+
+                Format the output as clean, well-structured markdown with clear sections and subsections.
+            """.strip()
+
+            formatting_prompt = formatting_prompt.format(
+                calendar_events=json.dumps(state["calendar_events"], indent=2),
+                research_results=research_results,
+            )
+
+        logger.info("Formatting prompt: " + formatting_prompt)
 
         # Use the LLM to format the results
         formatted_results = self.stream_insights_llm.invoke(
-            formatting_prompt.format(
-                calendar_events=json.dumps(calendar_events, indent=2),
-                research_results=research_results,
-            )
+            formatting_prompt
         )
+
         return {"markdown_results": formatted_results.content}
 
     def build_graph(self):
