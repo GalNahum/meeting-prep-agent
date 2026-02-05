@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from igptai import IGPT
 from langchain.agents import create_agent
 from langchain_core.callbacks.manager import dispatch_custom_event
-from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
 from langgraph.graph import END, START, StateGraph
@@ -279,12 +278,7 @@ class MeetingPlanner:
 
         self.react_llm = ChatOpenAI(model="o3-mini-2025-01-31")
 
-        self.fast_llm = ChatGroq(
-            api_key=os.getenv("GROQ_API_KEY"),
-            model="llama-3.3-70b-versatile"
-        )
-
-        self.extraction_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        self.fast_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
         self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
         self.react_tools = [
@@ -321,8 +315,8 @@ class MeetingPlanner:
             model="gpt-4.1-nano"
         ).with_structured_output(IGPTRouteDecision)
 
-        self.calendar_resolver_llm = self.extraction_llm.with_structured_output(CalendarResolution)
-        self.calendar_parser_llm = self.extraction_llm.with_structured_output(CalendarData)
+        self.calendar_resolver_llm = self.fast_llm.with_structured_output(CalendarResolution)
+        self.calendar_parser_llm = self.fast_llm.with_structured_output(CalendarData)
 
     def _calendar_agent(self, *, max_steps: int = 30) -> MCPAgent:
         """
