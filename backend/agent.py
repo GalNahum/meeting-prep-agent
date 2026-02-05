@@ -706,21 +706,22 @@ class MeetingPlanner:
                 stream=False,
             )
         except Exception as e:
-            # If preflight fails, don't block meeting prep, fall back to existing behavior (router decides)
-            logger.warning(f"iGPT preflight failed; proceeding. Error: {e}")
-            preflight_res = None
+            preflight_res = {"error": f"iGPT preflight failed proceeding. Error: {e}"}
 
-        if preflight_res:
-            output = preflight_res.get("output") if isinstance(preflight_res, dict) else preflight_res
-            if isinstance(output, str):
-                try:
-                    output = json.loads(output)
-                except Exception:
-                    output = None
+        if isinstance(preflight_res, dict) and preflight_res.get("error"):
+            error = f"iGPT preflight returned error: {preflight_res.get('error')}"
+            logger.warning(error)
+            return _skip(error)
 
-            if isinstance(output, dict):
-                if not output.get("has_any_prior_conversation", False):
-                    return _skip("No prior internal conversations found with any external attendee; skip iGPT.")
+        output = preflight_res.get("output") if isinstance(preflight_res, dict) else preflight_res
+        if isinstance(output, str):
+            try:
+                output = json.loads(output)
+            except Exception:
+                output = None
+
+        if isinstance(output, dict) and not output.get("has_any_prior_conversation", False):
+            return _skip("No prior internal conversations found with any external attendee, skip iGPT.")
 
         # Now use your existing router LLM logic (unchanged)
         router_prompt = f"""
