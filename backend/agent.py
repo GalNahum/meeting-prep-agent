@@ -596,100 +596,168 @@ class MeetingPlanner:
 
     def igpt_router_node(self, state: State):
         """
-        LLM-based router:
-        - Decides whether to call iGPT at all (to save tokens/latency)
-        - Optionally selects a subset of calendar_events to send to iGPT
-        This does NOT affect calendar_events passed to ReAct; only iGPT input selection.
+        Router:
+        1) Cheap deterministic guards
+        2) Cheap iGPT preflight: do we have ANY prior internal convo with ANY attendee?
+        3) If yes, run router_llm to select events for full iGPT recall
         """
         dispatch_custom_event("igpt_router_status", "Deciding whether to run iGPT...")
 
-        # If iGPT isn't configured, skip immediately (no router LLM call)
+        empty = json.dumps({"meetings": []}, ensure_ascii=False, indent=2)
+
+        def _skip(reason: str) -> Dict[str, Any]:
+            return {
+                "igpt_should_run": False,
+                "igpt_calendar_events": [],
+                "igpt_router_reason": reason,
+                "igpt_results": empty,
+            }
+
+        # Basic guards
         if not self.igpt:
-            empty = json.dumps({"companies": []}, ensure_ascii=False, indent=2)
-            return {
-                "igpt_should_run": False,
-                "igpt_calendar_events": [],
-                "igpt_router_reason": "iGPT not configured (missing IGPT_API_KEY); skip iGPT.",
-                "igpt_results": empty,
-            }
+            return _skip("iGPT not configured (missing IGPT_API_KEY); skip iGPT.")
 
-        calendar_events = state["calendar_events"] or []
+        calendar_events = state.get("calendar_events") or []
         if not calendar_events:
-            empty = json.dumps({"companies": []}, ensure_ascii=False, indent=2)
-            return {
-                "igpt_should_run": False,
-                "igpt_calendar_events": [],
-                "igpt_router_reason": "No meetings found; skip iGPT.",
-                "igpt_results": empty,
-            }
+            return _skip("No meetings found; skip iGPT.")
 
-        # If no external attendees exist, skip iGPT (no router LLM call)
-        has_any_external = any((e.get("attendees") or {}) for e in calendar_events if isinstance(e, dict))
+        # “external attendees exist” == at least one meeting has non-empty attendees list
+        has_any_external = any(
+            isinstance(e, dict) and (e.get("attendees") or [])
+            for e in calendar_events
+        )
         if not has_any_external:
-            empty = json.dumps({"companies": []}, ensure_ascii=False, indent=2)
-            return {
-                "igpt_should_run": False,
-                "igpt_calendar_events": [],
-                "igpt_router_reason": "No external attendees in any meeting; skip iGPT.",
-                "igpt_results": empty,
+            return _skip("No external attendees in any meeting; skip iGPT.")
+
+        # Preflight iGPT: do we have ANY prior internal conversation with ANY attendee?
+        attendee_emails = sorted({
+            a.get("email", "").strip().lower()
+            for e in calendar_events
+            if isinstance(e, dict)
+            for a in (e.get("attendees") or [])
+            if isinstance(a, dict) and a.get("email")
+        })
+
+        if not attendee_emails:
+            return _skip("No external attendee emails found; skip iGPT.")
+
+        IGPT_PREFLIGHT_SCHEMA = {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "has_any_prior_conversation": {
+                        "type": "boolean"
+                    },
+                    "matched_emails": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "references": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {
+                                    "type": "string"
+                                },
+                                "url": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "title",
+                                "url"
+                            ],
+                            "additionalProperties": False
+                        }
+                    }
+                },
+                "required": [
+                    "has_any_prior_conversation",
+                    "matched_emails",
+                    "references"
+                ],
+                "additionalProperties": False
             }
+        }
 
+        preflight_prompt = f"""
+        You are checking INTERNAL history only (emails, notes, docs, internal messages).
+        Goal: determine if we have ANY prior internal conversations/threads involving ANY of these attendee emails.
+    
+        Attendee emails (deduped):
+        {json.dumps(attendee_emails, ensure_ascii=False, indent=2)}
+    
+        Rules:
+        - Only count real internal sources (threads/notes/docs) that include the attendee email.
+        - Do NOT infer or guess.
+        - If nothing exists, return has_any_prior_conversation=false, matched_emails=[], references=[].
+        - Keep references small (up to 3).
+        Return JSON strictly matching the schema.
+        """.strip()
+
+        try:
+            preflight_res = self.igpt.recall.ask(
+                input=preflight_prompt,
+                quality="cef-1-normal",
+                output_format=IGPT_PREFLIGHT_SCHEMA,
+                stream=False,
+            )
+        except Exception as e:
+            # If preflight fails, don't block meeting prep, fall back to existing behavior (router decides)
+            logger.warning(f"iGPT preflight failed; proceeding. Error: {e}")
+            preflight_res = None
+
+        if preflight_res:
+            output = preflight_res.get("output") if isinstance(preflight_res, dict) else preflight_res
+            if isinstance(output, str):
+                try:
+                    output = json.loads(output)
+                except Exception:
+                    output = None
+
+            if isinstance(output, dict):
+                if not output.get("has_any_prior_conversation", False):
+                    return _skip("No prior internal conversations found with any external attendee; skip iGPT.")
+
+        # Now use your existing router LLM logic (unchanged)
         router_prompt = f"""
-              You are controlling whether to call an expensive internal-recall tool (iGPT).
-              Your goal is to minimize wasted tokens while preserving meeting-prep quality.
-
-              You are given calendar_events for a single day (JSON list). Each event includes:
-              - company
-              - title
-              - meeting_time
-              - attendees: a dict of external attendee emails->names (Tavily employees already removed)
-
-              calendar_events:
-              {json.dumps(calendar_events, ensure_ascii=False, indent=2)}
-
-              Decide:
-              1) should_run_igpt:
-              - Return false if internal context is very unlikely to help (e.g., no external attendees).
-              - Return true if there are external attendees and internal history could matter.
-
-              2) selected_event_indices:
-              - If should_run_igpt is true, choose the minimal subset of events needed.
-              - Avoid duplicates: if multiple events are with the same company and largely same attendees, pick only one.
-              - Make sure every unique external attendee email is covered by at least one selected event (so iGPT can pull attendee context).
-              - Prefer events that look important (keywords like: demo, review, kickoff, pricing, contract, negotiation, QBR, exec, board).
-              - If unsure, pick one event per company that covers the union of attendees.
-
-              3) reason: short explanation.
-
-              Output must match the structured schema (should_run_igpt, selected_event_indices, reason).
-          """.strip()
+        You are controlling whether to call an expensive internal-recall tool (iGPT).
+        Your goal is to minimize wasted tokens while preserving meeting-prep quality.
+    
+        calendar_events:
+        {json.dumps(calendar_events, ensure_ascii=False, indent=2)}
+    
+        Decide:
+        1) should_run_igpt
+        2) selected_event_indices
+        3) reason
+    
+        Output must match the structured schema (should_run_igpt, selected_event_indices, reason).
+        """.strip()
 
         try:
             decision = self.router_llm.invoke(router_prompt)
         except Exception as e:
-            # Preserve existing behavior if router fails: run iGPT on all events (safe fallback).
             return {
                 "igpt_should_run": True,
                 "igpt_calendar_events": calendar_events,
                 "igpt_router_reason": f"Router failed; defaulting to run iGPT on all events. Error: {str(e)}",
             }
 
-        # Normalize decision
-        indices = [i for i in decision.selected_event_indices if isinstance(i, int) and 0 <= i < len(calendar_events)]
+        indices = [
+            i for i in decision.selected_event_indices
+            if isinstance(i, int) and 0 <= i < len(calendar_events)
+        ]
         selected_events = [calendar_events[i] for i in indices]
 
-        # If model said run but selected nothing, fall back to safest non-breaking behavior: run on all events.
         if decision.should_run_igpt and not selected_events:
             selected_events = calendar_events
 
         if not decision.should_run_igpt:
-            empty = json.dumps({"companies": []}, ensure_ascii=False, indent=2)
-            return {
-                "igpt_should_run": False,
-                "igpt_calendar_events": [],
-                "igpt_router_reason": decision.reason,
-                "igpt_results": empty,
-            }
+            return _skip(decision.reason)
 
         return {
             "igpt_should_run": True,
