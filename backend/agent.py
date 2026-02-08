@@ -52,6 +52,7 @@ class Meeting(BaseModel):
     company: str  # This will be the client company name
     attendees: List[Attendee] = Field(default_factory=list)
     meeting_time: str
+    link: str = ""
 
 
 class CalendarData(BaseModel):
@@ -144,6 +145,9 @@ class MeetingPlanner:
 
         self.calendar_resolver_llm = self.fast_llm.with_structured_output(CalendarResolution)
         self.calendar_parser_llm = self.fast_llm.with_structured_output(CalendarData)
+
+    def _dump_json(self, obj: Any) -> str:
+        return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
     def _calendar_agent(self, *, max_steps: int = 30) -> MCPAgent:
         """
@@ -430,7 +434,7 @@ class MeetingPlanner:
         """
         dispatch_custom_event("igpt_router_status", "Deciding whether to run iGPT...")
 
-        empty = json.dumps({"meetings": []}, ensure_ascii=False, indent=2)
+        empty = self._dump_json({"meetings": []})
 
         def _skip(reason: str) -> Dict[str, Any]:
             return {
@@ -473,7 +477,7 @@ class MeetingPlanner:
         Goal: determine if we have ANY prior internal conversations/threads involving ANY of these attendee emails.
     
         Attendee emails (deduped):
-        {json.dumps(attendee_emails, ensure_ascii=False, indent=2)}
+        {self._dump_json(attendee_emails)}
     
         Rules:
         - Only count real internal sources (messages/threads/notes/docs) that include the attendee email.
@@ -514,7 +518,7 @@ class MeetingPlanner:
         Your goal is to minimize wasted tokens while preserving meeting-prep quality.
     
         calendar_events:
-        {json.dumps(calendar_events, ensure_ascii=False, indent=2)}
+        {self._dump_json(calendar_events)}
     
         Decide:
         1) should_run_igpt
@@ -576,7 +580,7 @@ class MeetingPlanner:
             You must NOT use public or web information.
 
             Meetings (JSON):
-            {json.dumps(calendar_events, indent=2)}
+            {self._dump_json(calendar_events)}
 
             Instructions:
 
@@ -627,7 +631,7 @@ class MeetingPlanner:
         if isinstance(res, dict):
             output = res.get("output", "")
             if isinstance(output, (dict, list)):
-                output_str = json.dumps(output, ensure_ascii=False, indent=2)
+                output_str = self._dump_json(output)
             else:
                 output_str = str(output)
 
@@ -651,8 +655,8 @@ class MeetingPlanner:
             {calendar_events}
 
             Use Tavily search for:
-            - attendee public profiles (e.g., LinkedIn)
-            - company AI initiatives / public signals
+            - Attendee public profiles (e.g., LinkedIn)
+            - Aompany AI initiatives / public signals
 
             1. Search for the attendees name using all available information such as their email, initials/last name, etc.
             - provide details on the attendees experience, education, and skills, and location
@@ -663,7 +667,7 @@ class MeetingPlanner:
         """.strip()
 
         formatted_prompt = formatted_prompt.format(
-            calendar_events=state["calendar_events"]
+            calendar_events=self._dump_json(state["calendar_events"])
         )
 
         logger.info("React prompt: " + formatted_prompt)
@@ -793,7 +797,7 @@ class MeetingPlanner:
             """.strip()
 
             formatting_prompt = formatting_prompt.format(
-                calendar_events=json.dumps(state["calendar_events"], indent=2),
+                calendar_events=self._dump_json(state["calendar_events"]),
                 research_results=research_results,
             )
 
