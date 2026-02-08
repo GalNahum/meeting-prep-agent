@@ -359,7 +359,7 @@ class MeetingPlanner:
 
             CALENDAR DATA (INPUT — DO NOT FILTER OR DROP ANY EVENTS):
 
-            md```
+            text```
             {calendar_data}
             ```
 
@@ -414,16 +414,30 @@ class MeetingPlanner:
         )
 
         # Parse the calendar data using the string format method
-        calendar_events = self.calendar_parser_llm.invoke(
+        structured_data = self.calendar_parser_llm.invoke(
             extraction_prompt
         )
 
         logger.info(
             "Structured data: %s",
-            calendar_events.model_dump()
+            structured_data.model_dump()
         )
 
-        return {"calendar_events": calendar_events.model_dump()["meetings"]}
+        for meeting in structured_data.meetings:
+            # Extract company name from meeting title if needed
+            display_name = meeting.company or meeting.title or "Meeting"
+
+            try:
+                dt = datetime.fromisoformat(meeting.meeting_time)
+                time_str = dt.strftime("%H:%M")
+            except Exception:
+                time_str = meeting.meeting_time  # fallback if parsing fails
+
+            dispatch_custom_event(
+                "company_event", f"{display_name} @ {time_str}"
+            )
+
+        return {"calendar_events": structured_data.model_dump()["meetings"]}
 
     def igpt_router_node(self, state: State):
         """
