@@ -524,47 +524,10 @@ class MeetingPlanner:
         if isinstance(output, dict) and not output.get("has_any_prior_conversation", False):
             return _skip("No prior internal conversations found with any external attendee, skip iGPT.")
 
-        # Now use your existing router LLM logic (unchanged)
-        router_prompt = f"""
-        You are controlling whether to call an expensive internal-recall tool (iGPT).
-        Your goal is to minimize wasted tokens while preserving meeting-prep quality.
-    
-        calendar_events:
-        {self._dump_json(calendar_events)}
-    
-        Decide:
-        1) should_run_igpt
-        2) selected_event_indices
-        3) reason
-    
-        Output must match the structured schema (should_run_igpt, selected_event_indices, reason).
-        """.strip()
-
-        try:
-            decision = self.router_llm.invoke(router_prompt)
-        except Exception as e:
-            return {
-                "igpt_should_run": True,
-                "igpt_calendar_events": calendar_events,
-                "igpt_router_reason": f"Router failed; defaulting to run iGPT on all events. Error: {str(e)}",
-            }
-
-        indices = [
-            i for i in decision.selected_event_indices
-            if isinstance(i, int) and 0 <= i < len(calendar_events)
-        ]
-        selected_events = [calendar_events[i] for i in indices]
-
-        if decision.should_run_igpt and not selected_events:
-            selected_events = calendar_events
-
-        if not decision.should_run_igpt:
-            return _skip(decision.reason)
-
         return {
             "igpt_should_run": True,
-            "igpt_calendar_events": selected_events,
-            "igpt_router_reason": decision.reason,
+            "igpt_calendar_events": calendar_events,
+            "igpt_router_reason": "Prior internal conversations found; running iGPT.",
         }
 
     def igpt_node(self, state: State):
@@ -668,7 +631,7 @@ class MeetingPlanner:
 
             Use Tavily search for:
             - Attendee public profiles (e.g., LinkedIn)
-            - Aompany AI initiatives / public signals
+            - Company AI initiatives / public signals
 
             1. Search for the attendees name using all available information such as their email, initials/last name, etc.
             - provide details on the attendees experience, education, and skills, and location
