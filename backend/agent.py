@@ -359,9 +359,7 @@ class MeetingPlanner:
 
             CALENDAR DATA (INPUT — DO NOT FILTER OR DROP ANY EVENTS):
 
-            text```
             {calendar_data}
-            ```
 
             IMPORTANT — NON-NEGOTIABLE RULES:
             - You MUST return EVERY meeting present in the input calendar data.
