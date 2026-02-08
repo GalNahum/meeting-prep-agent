@@ -736,7 +736,7 @@ class MeetingPlanner:
 
                 For EACH attendee, create a subsection:
 
-                #### {{Attendee Name}} ({{Role / Company if known}})
+                #### {{Attendee Name}} — {{Role}} @ {{Company}} ([LinkedIn](URL))
 
                 Combine internal and external context naturally:
 
