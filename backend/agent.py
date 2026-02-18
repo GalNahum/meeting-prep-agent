@@ -78,11 +78,13 @@ class MeetingPlanner:
         )
 
         self.igpt_api_key = os.getenv("IGPT_API_KEY")
-        self.igpt_user = os.getenv("IGPT_USER") or "meeting-prep-agent"
+        self.igpt_user = os.getenv("IGPT_USER")
         self.igpt_quality = os.getenv("IGPT_QUALITY") or "cef-1-normal"
+
+        # iGPT runs only when both API key and user are configured
         self.igpt = (
             IGPT(api_key=self.igpt_api_key, user=self.igpt_user)
-            if self.igpt_api_key
+            if (self.igpt_api_key and self.igpt_user)
             else None
         )
 
