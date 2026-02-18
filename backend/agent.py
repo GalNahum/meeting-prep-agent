@@ -249,12 +249,21 @@ class MeetingPlanner:
     def react_node(self, state: State):
         """Use react architecture to search for information about the attendees"""
         calendar_events = state["calendar_events"]
-        igpt_results = state.get("igpt_results", "")
+        igpt_results = (state.get("igpt_results") or "").strip()
 
         dispatch_custom_event(
             "react_status", "Searching Tavily for Meeting Insights..."
         )
-        # Create a function to process a single event
+
+        igpt_block = ""
+        if igpt_results:
+            igpt_block = f"""
+            Internal context (from iGPT connected datasources):
+            {igpt_results}
+
+            Combine the internal context above with public web research (Tavily search).
+            """.strip()
+
         formatted_prompt = f"""
         Your goal is to help me prepare for an upcoming meeting. 
         You will be provided with the name of a company we are meeting with and a list of attendees.
@@ -262,10 +271,8 @@ class MeetingPlanner:
         Meeting information:
         {calendar_events}
 
-        Internal context (from iGPT connected datasources; may be empty):
-        {igpt_results}
+        {igpt_block}
 
-        Combine the internal iGPT context above with public web research (Tavily search).
         Use Tavily search for:
         - attendee public profiles (e.g., LinkedIn)
         - company AI initiatives / public signals
@@ -276,7 +283,7 @@ class MeetingPlanner:
         - it is important you find the profile of all the attendees!
         2. Research the company in the context of AI initiatives using tavily search.
         3. Provide your findings summarized concisely with the relevant links. Do not include anything else in the output.
-        """
+        """.strip()
 
         result = self.react_agent.invoke(
             {"messages": [{"role": "user", "content": formatted_prompt}]}
