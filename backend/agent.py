@@ -239,12 +239,12 @@ class MeetingPlanner:
             return {"igpt_results": ""}
 
         if isinstance(res, dict):
-            output = res.get("output", "")
+            output = res.get("output") or ""
             if isinstance(output, (dict, list)):
                 return {"igpt_results": json.dumps(output, indent=2)}
             return {"igpt_results": str(output)}
 
-        return {"igpt_results": str(res)}
+        return {"igpt_results": "" if res is None else str(res)}
 
     def react_node(self, state: State):
         """Use react architecture to search for information about the attendees"""
