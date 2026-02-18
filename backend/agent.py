@@ -191,7 +191,6 @@ class MeetingPlanner:
         If iGPT isn't configured or there are no external attendees, skip.
         Otherwise, fetch internal context from iGPT and pass it to ReAct.
         """
-        dispatch_custom_event("igpt_status", "Fetching internal context from iGPT...")
 
         if not self.igpt:
             return {"igpt_results": ""}
@@ -207,6 +206,8 @@ class MeetingPlanner:
         )
         if not has_external:
             return {"igpt_results": ""}
+
+        dispatch_custom_event("igpt_status", "Fetching internal context from iGPT...")
 
         prompt = f"""
         You are retrieving INTERNAL context only (emails, threads, notes, documents, internal messages).
